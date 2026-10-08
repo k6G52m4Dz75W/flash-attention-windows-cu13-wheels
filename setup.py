@@ -198,7 +198,7 @@ if not SKIP_CUDA_BUILD and not IS_ROCM:
 
     nvcc_flags = [
     "-O3",
-    "-std=c++17",
+    "-std=c++20",
     "-U__CUDA_NO_HALF_OPERATORS__",
     "-U__CUDA_NO_HALF_CONVERSIONS__",
     "-U__CUDA_NO_HALF2_OPERATORS__",
@@ -217,11 +217,18 @@ if not SKIP_CUDA_BUILD and not IS_ROCM:
     # "-DFLASHATTENTION_DISABLE_LOCAL",
     ]
 
-    compiler_c17_flag=["-O3", "-std=c++17"]
-    # Add Windows-specific flags
-    if sys.platform == "win32" and os.getenv('DISTUTILS_USE_SDK') == '1':
-        nvcc_flags.extend(["-Xcompiler", "/Zc:__cplusplus"])
-        compiler_c17_flag=["-O2", "/std:c++17", "/Zc:__cplusplus"]
+    # Windows 上 cl.exe 只认 /std:c++20（不是 GCC 的 -std=c++20）；torch 2.14 的头文件
+    # 用到了指定初始化器、位域默认成员初始值设定项、std::strong_ordering 等 C++20 特性，
+    # 必须用 C++20 才编得过。这里不再依赖 DISTUTILS_USE_SDK，win32 下统一用 MSVC 写法。
+    if sys.platform == "win32":
+        # CUDA 13.4 自带的 CCCL 要求 MSVC 使用"标准一致预处理器"，
+        # 传统预处理器会触发 #error 直接中止编译。/Zc:preprocessor 必须传给 cl.exe：
+        #   - .cu 文件经 nvcc 调用 cl.exe，用 -Xcompiler 转交；
+        #   - .cpp 文件由 cl.exe 直接编译，直接写进 compiler_c17_flag。
+        nvcc_flags = nvcc_flags + ["-Xcompiler", "/Zc:__cplusplus", "-Xcompiler", "/Zc:preprocessor"]
+        compiler_c17_flag = ["-O2", "/std:c++20", "/Zc:__cplusplus", "/Zc:preprocessor"]
+    else:
+        compiler_c17_flag = ["-O3", "-std=c++20"]
 
     ext_modules.append(
         CUDAExtension(
